@@ -1,6 +1,6 @@
 {
   "name": "@libmedia/esbuild-plugin-typescript",
-  "version": "12.2.0",
+  "version": "12.2.1",
   "publishConfig": {
     "access": "public"
   },
@@ -51,7 +51,7 @@
     "es2015"
   ],
   "peerDependencies": {
-    "esbuild": "^0.15.0",
+    "esbuild": ">=0.14.0",
     "tslib": "*",
     "typescript": ">=3.7.0"
   },
