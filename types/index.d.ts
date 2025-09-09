@@ -1,8 +1,9 @@
 /* eslint-disable no-use-before-define */
 import type _typescript from 'typescript';
 
-import type { FilterPattern } from '@rollup/pluginutils';
-import type { Plugin } from 'rollup';
+export type FilterPattern = ReadonlyArray<string | RegExp> | string | RegExp | null;
+
+import type { PartialMessage, Plugin } from 'esbuild';
 import type {
   CompilerOptions,
   CompilerOptionsValue,
@@ -28,7 +29,7 @@ export type CustomTransformerFactories = {
 interface ProgramTransformerFactory<T extends TransformerStage> {
   type: 'program';
 
-  factory(program: Program): StagedTransformerFactory<T>;
+  factory(program: Program, getProgram?: () => Program): StagedTransformerFactory<T>;
 }
 
 interface TypeCheckerTransformerFactory<T extends TransformerStage> {
@@ -37,7 +38,7 @@ interface TypeCheckerTransformerFactory<T extends TransformerStage> {
   factory(typeChecker: TypeChecker): StagedTransformerFactory<T>;
 }
 
-export interface RollupTypescriptPluginOptions {
+export interface EsbuildTypescriptPluginOptions {
   /**
    * If using incremental this is the folder where the cached
    * files will be created and kept for Typescript incremental
@@ -75,12 +76,7 @@ export interface RollupTypescriptPluginOptions {
   /**
    * TypeScript custom transformers
    */
-  transformers?: CustomTransformerFactories | ((program: Program) => CustomTransformers);
-  /**
-   * When set to false, force non-cached files to always be emitted in the output directory.output
-   * If not set, will default to true with a warning.
-   */
-  outputToFilesystem?: boolean;
+  transformers?: CustomTransformerFactories | ((program: Program, getProgram?: () => Program) => CustomTransformers);
   /**
    * Pass additional compiler options to the plugin.
    */
@@ -107,9 +103,14 @@ export type PartialCompilerOptions =
   | Partial<FlexibleCompilerOptions>
   | Partial<JsonCompilerOptions>;
 
-export type RollupTypescriptOptions = RollupTypescriptPluginOptions & PartialCompilerOptions;
+export type EsbuildTypescriptOptions = EsbuildTypescriptPluginOptions & PartialCompilerOptions;
+
+export interface PluginContext {
+  warn: (message: PartialMessage) => void
+  error: (message: PartialMessage) => void
+}
 
 /**
- * Seamless integration between Rollup and Typescript.
+ * Seamless integration between esbuild and Typescript.
  */
-export default function typescript(options?: RollupTypescriptOptions): Plugin;
+export default function typescript(options?: EsbuildTypescriptOptions): Plugin;

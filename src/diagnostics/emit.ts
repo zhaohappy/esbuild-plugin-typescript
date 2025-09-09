@@ -1,4 +1,4 @@
-import type { PluginContext } from 'rollup';
+import type { PluginContext } from '../../types';
 import type typescript from 'typescript';
 import type { Diagnostic, DiagnosticReporter } from 'typescript';
 
@@ -9,7 +9,7 @@ import diagnosticToWarning from './toWarning';
 const CANNOT_COMPILE_ESM = 1204;
 
 /**
- * Emit a Rollup warning or error for a Typescript type error.
+ * Emit a esbuild warning or error for a Typescript type error.
  */
 export function emitDiagnostic(
   ts: typeof typescript,
@@ -21,7 +21,7 @@ export function emitDiagnostic(
 
   const { noEmitOnError } = host.getCompilationSettings();
 
-  // Build a Rollup warning object from the diagnostics object.
+  // Build a esbuild warning object from the diagnostics object.
   const warning = diagnosticToWarning(ts, host, diagnostic);
 
   // Errors are fatal. Otherwise emit warnings.

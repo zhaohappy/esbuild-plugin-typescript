@@ -1,11 +1,11 @@
 import defaultTs from 'typescript';
 
-import type { RollupTypescriptOptions, PartialCompilerOptions } from '../../types';
+import type { EsbuildTypescriptOptions, PartialCompilerOptions } from '../../types';
 import { getTsLibPath } from '../tslib';
 
 /**
- * Separate the Rollup plugin options from the Typescript compiler options,
- * and normalize the Rollup options.
+ * Separate the esbuild plugin options from the Typescript compiler options,
+ * and normalize the esbuild options.
  * @returns Object with normalized options:
  * - `filter`: Checks if a file should be included.
  * - `tsconfig`: Path to a tsconfig, or directive to ignore tsconfig.
@@ -13,7 +13,7 @@ import { getTsLibPath } from '../tslib';
  * - `typescript`: Instance of Typescript library (possibly custom).
  * - `tslib`: ESM code from the tslib helper library (possibly custom).
  */
-export const getPluginOptions = (options: RollupTypescriptOptions) => {
+export const getPluginOptions = (options: EsbuildTypescriptOptions) => {
   const {
     cacheDir,
     exclude,
@@ -24,7 +24,6 @@ export const getPluginOptions = (options: RollupTypescriptOptions) => {
     tsconfig,
     tslib,
     typescript,
-    outputToFilesystem,
     compilerOptions,
     // previously was compilerOptions
     ...extra
@@ -41,6 +40,5 @@ export const getPluginOptions = (options: RollupTypescriptOptions) => {
     typescript: typescript || defaultTs,
     tslib: tslib || getTsLibPath(),
     transformers,
-    outputToFilesystem
   };
 };

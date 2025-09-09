@@ -1,7 +1,6 @@
 import { readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 
-import type { PluginContext } from 'rollup';
 import typescript from 'typescript';
 import type {
   Diagnostic,
@@ -14,7 +13,7 @@ import type {
   WatchOptions
 } from 'typescript';
 
-import type { RollupTypescriptOptions } from '../../types';
+import type { EsbuildTypescriptOptions, PluginContext } from '../../types';
 import diagnosticToWarning from '../diagnostics/toWarning';
 
 import type { CompilerOptions, EnumCompilerOptions, PartialCompilerOptions } from './interfaces';
@@ -37,6 +36,7 @@ export interface TypeScriptConfig {
   errors: Diagnostic[];
   wildcardDirectories?: MapLike<WatchDirectoryFlags> | undefined;
   compileOnSave?: boolean | undefined;
+  configPath: string
 }
 
 function makeForcedCompilerOptions(noForceEmit: boolean) {
@@ -138,7 +138,7 @@ const configCache = new Map() as typescript.ESMap<string, ExtendedConfigCacheEnt
  */
 export function parseTypescriptConfig(
   ts: typeof typescript,
-  tsconfig: RollupTypescriptOptions['tsconfig'],
+  tsconfig: EsbuildTypescriptOptions['tsconfig'],
   compilerOptions: PartialCompilerOptions,
   noForceEmit: boolean
 ): TypeScriptConfig {
@@ -200,7 +200,8 @@ export function parseTypescriptConfig(
 
   return {
     ...parsedConfig,
-    autoSetSourceMap
+    autoSetSourceMap,
+    configPath: basePath
   };
 }
 
@@ -216,6 +217,9 @@ export function emitParsedOptionsErrors(
   if (parsedOptions.errors.length > 0) {
     parsedOptions.errors.forEach((error) => context.warn(diagnosticToWarning(ts, null, error)));
 
-    context.error(`@libmedia/esbuild-plugin-typescript: Couldn't process compiler options`);
+    context.error({
+      pluginName: '@libmedia/esbuild-plugin-typescript',
+      text: `@libmedia/esbuild-plugin-typescript: Couldn't process compiler options`
+    });
   }
 }

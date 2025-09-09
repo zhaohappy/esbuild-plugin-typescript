@@ -5,7 +5,7 @@ import type {
   ResolvedProjectReference,
   ModuleKind
 } from 'typescript';
-import type { CreateFilter } from '@rollup/pluginutils';
+import type { CreateFilter } from './createFilter';
 
 import type { DiagnosticsHost } from './diagnostics/host';
 

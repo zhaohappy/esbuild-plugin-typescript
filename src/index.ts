@@ -1,11 +1,12 @@
 import * as path from 'path';
+import * as fs from 'fs'
 
-import { createFilter } from '@rollup/pluginutils';
+import createFilter from './createFilter';
 
-import type { Plugin, SourceDescription } from 'rollup';
+import type { PartialMessage, Plugin } from 'esbuild';
 import type { Watch } from 'typescript';
 
-import type { RollupTypescriptOptions } from '../types';
+import type { EsbuildTypescriptOptions, PluginContext } from '../types';
 
 import createFormattingHost from './diagnostics/host';
 import createModuleResolver from './moduleResolution';
@@ -23,14 +24,13 @@ import { preflight } from './preflight';
 import createWatchProgram, { WatchProgramHelper } from './watchProgram';
 import TSCache from './tscache';
 
-export default function typescript(options: RollupTypescriptOptions = {}): Plugin {
+export default function typescript(options: EsbuildTypescriptOptions = {}): Plugin {
   const {
     cacheDir,
     compilerOptions,
     exclude,
     filterRoot,
     include,
-    outputToFilesystem,
     noForceEmit,
     transformers,
     tsconfig,
@@ -42,6 +42,13 @@ export default function typescript(options: RollupTypescriptOptions = {}): Plugi
   const watchProgramHelper = new WatchProgramHelper();
 
   const parsedOptions = parseTypescriptConfig(ts, tsconfig, compilerOptions, noForceEmit);
+
+  if (parsedOptions.options.sourceMap) {
+    parsedOptions.options.sourceMap = false;
+    parsedOptions.options.inlineSources = true;
+    parsedOptions.options.inlineSourceMap = true;
+  }
+
   const filter = createFilter(include || '{,**/}*.(cts|mts|ts|tsx)', exclude, {
     resolve: filterRoot ?? parsedOptions.options.rootDir
   });
@@ -52,158 +59,124 @@ export default function typescript(options: RollupTypescriptOptions = {}): Plugi
 
   let program: Watch<unknown> | null = null;
 
+  const errors: PartialMessage[] = [];
+  const warnings: PartialMessage[] = [];
+
+  const context: PluginContext = {
+    error(message) {
+      errors.push(message);
+    },
+    warn(message) {
+      warnings.push(message);
+    }
+  }
+
   return {
     name: 'typescript',
 
-    buildStart(rollupOptions) {
-      emitParsedOptionsErrors(ts, this, parsedOptions);
+    setup(build) {
+      build.onStart(() => {
+        emitParsedOptionsErrors(ts, context, parsedOptions);
 
-      preflight({
-        config: parsedOptions,
-        context: this,
-        // TODO drop rollup@3 support and remove
-        inputPreserveModules: (rollupOptions as unknown as { preserveModules: boolean })
-          .preserveModules,
-        tslib
-      });
-
-      // Fixes a memory leak https://github.com/rollup/plugins/issues/322
-      if (this.meta.watchMode !== true) {
-        // eslint-disable-next-line
-        program?.close();
-        program = null;
-      }
-      if (!program) {
-        program = createWatchProgram(ts, this, {
-          formatHost,
-          resolveModule,
-          parsedOptions,
-          writeFile(fileName, data) {
-            if (parsedOptions.options.composite || parsedOptions.options.incremental) {
-              tsCache.cacheCode(fileName, data);
-            }
-            emittedFiles.set(fileName, data);
-          },
-          status(diagnostic) {
-            watchProgramHelper.handleStatus(diagnostic);
-          },
-          transformers
+        preflight({
+          config: parsedOptions,
+          context,
+          inputPreserveModules: (build.initialOptions as unknown as { preserveModules: boolean })
+            .preserveModules,
+          tslib
         });
-      }
-    },
+        if (!program) {
+          program = createWatchProgram(ts, context, {
+            formatHost,
+            resolveModule,
+            parsedOptions,
+            writeFile(fileName, data) {
+              if (parsedOptions.options.composite || parsedOptions.options.incremental) {
+                tsCache.cacheCode(fileName, data);
+              }
+              emittedFiles.set(fileName, data);
+            },
+            status(diagnostic) {
+              watchProgramHelper.handleStatus(diagnostic);
+            },
+            transformers
+          });
+        }
+        else {
+          watchProgramHelper.watch();
+        }
+        validateSourceMap(context, parsedOptions.options, build.initialOptions, parsedOptions.autoSetSourceMap);
+        validatePaths(context, parsedOptions.options, build.initialOptions);
+      })
 
-    watchChange(id) {
-      if (!filter(id)) return;
-
-      watchProgramHelper.watch();
-    },
-
-    buildEnd() {
-      if (this.meta.watchMode !== true) {
-        // ESLint doesn't understand optional chaining
-        // eslint-disable-next-line
+      build.onDispose(() => {
         program?.close();
-      }
-    },
+      })
 
-    renderStart(outputOptions) {
-      validateSourceMap(this, parsedOptions.options, outputOptions, parsedOptions.autoSetSourceMap);
-      validatePaths(this, parsedOptions.options, outputOptions);
-    },
+      build.onLoad({filter: /\.(cts|mts|ts|tsx)$/}, async (args) => {
+        if (!filter(args.path)) return ;
 
-    resolveId(importee, importer) {
-      if (importee === 'tslib') {
-        return tslib;
-      }
+        await watchProgramHelper.wait();
 
-      if (!importer) return null;
-
-      // Convert path from windows separators to posix separators
-      const containingFile = normalizePath(importer);
-
-      // when using node16 or nodenext module resolution, we need to tell ts if
-      // we are resolving to a commonjs or esnext module
-      const mode =
-        typeof ts.getImpliedNodeFormatForFile === 'function'
-          ? ts.getImpliedNodeFormatForFile(
-              // @ts-expect-error
-              containingFile,
-              undefined, // eslint-disable-line no-undefined
-              { ...ts.sys, ...formatHost },
-              parsedOptions.options
-            )
-          : undefined; // eslint-disable-line no-undefined
-
-      // eslint-disable-next-line no-undefined
-      const resolved = resolveModule(importee, containingFile, undefined, mode);
-
-      if (resolved) {
-        if (/\.d\.[cm]?ts/.test(resolved.extension)) return null;
-        if (!filter(resolved.resolvedFileName)) return null;
-        return path.normalize(resolved.resolvedFileName);
-      }
-
-      return null;
-    },
-
-    async load(id) {
-      if (!filter(id)) return null;
-
-      this.addWatchFile(id);
-      await watchProgramHelper.wait();
-
-      const fileName = normalizePath(id);
-      if (!parsedOptions.fileNames.includes(fileName)) {
-        // Discovered new file that was not known when originally parsing the TypeScript config
-        parsedOptions.fileNames.push(fileName);
-      }
-
-      const output = findTypescriptOutput(ts, parsedOptions, id, emittedFiles, tsCache);
-
-      return output.code != null ? (output as SourceDescription) : null;
-    },
-
-    async generateBundle(outputOptions) {
-      const declarationAndTypeScriptMapFiles = [...emittedFiles.keys()].filter(
-        (fileName) => isDeclarationOutputFile(fileName) || isTypeScriptMapOutputFile(fileName)
-      );
-
-      declarationAndTypeScriptMapFiles.forEach((id) => {
-        const code = getEmittedFile(id, emittedFiles, tsCache);
-        if (!code || !parsedOptions.options.declaration) {
-          return;
+        const fileName = normalizePath(args.path);
+        if (!parsedOptions.fileNames.includes(fileName)) {
+          // Discovered new file that was not known when originally parsing the TypeScript config
+          parsedOptions.fileNames.push(fileName);
         }
 
-        let baseDir: string | undefined;
-        if (outputOptions.dir) {
-          baseDir = outputOptions.dir;
-        } else if (outputOptions.file) {
-          // the bundle output directory used by rollup when outputOptions.file is used instead of outputOptions.dir
-          baseDir = path.dirname(outputOptions.file);
-        }
-        if (!baseDir) return;
+        const output = findTypescriptOutput(ts, parsedOptions, args.path, emittedFiles, tsCache);
 
-        this.emitFile({
-          type: 'asset',
-          fileName: normalizePath(path.relative(baseDir, id)),
-          source: code
+        const result = output.code != null ? {
+          contents: output.code,
+          errors: errors.slice(),
+          warnings: warnings.slice()
+        } : undefined;
+        errors.length = 0
+        warnings.length = 0
+        return result
+      })
+
+      build.onEnd(async () => {
+         const declarationAndTypeScriptMapFiles = [...emittedFiles.keys()].filter(
+          (fileName) => (isDeclarationOutputFile(fileName) && filter(fileName.replace(/\.d\.ts$/, '.ts'))) || isTypeScriptMapOutputFile(fileName)
+        );
+
+        declarationAndTypeScriptMapFiles.forEach((id) => {
+          const code = getEmittedFile(id, emittedFiles, tsCache);
+          if (!code || !parsedOptions.options.declaration) {
+            return;
+          }
+
+          let baseDir: string | undefined;
+          if (parsedOptions.options.declarationDir) {
+            baseDir = path.resolve(parsedOptions.configPath, parsedOptions.options.declarationDir)
+          }
+          else if (build.initialOptions.outdir) {
+            baseDir = build.initialOptions.outdir;
+          }
+          else if (build.initialOptions.outfile) {
+            // the bundle output directory used by rollup when outputOptions.file is used instead of outputOptions.dir
+            baseDir = path.dirname(build.initialOptions.outfile);
+          }
+
+          if (!baseDir) return;
+
+          const fileName = path.join(baseDir, path.basename(id))
+          fs.mkdirSync(path.dirname(fileName), { recursive: true })
+          fs.writeFileSync(fileName, code)
         });
-      });
 
-      const tsBuildInfoPath = ts.getTsBuildInfoEmitOutputFilePath(parsedOptions.options);
-      if (tsBuildInfoPath) {
-        const tsBuildInfoSource = emittedFiles.get(tsBuildInfoPath);
-        // https://github.com/rollup/plugins/issues/681
-        if (tsBuildInfoSource) {
-          await emitFile(
-            outputOptions,
-            outputToFilesystem,
-            this,
-            tsBuildInfoPath,
-            tsBuildInfoSource
-          );
+        const tsBuildInfoPath = ts.getTsBuildInfoEmitOutputFilePath(parsedOptions.options);
+        if (tsBuildInfoPath) {
+          const tsBuildInfoSource = emittedFiles.get(tsBuildInfoPath);
+          if (tsBuildInfoSource) {
+            await emitFile(
+              tsBuildInfoPath,
+              tsBuildInfoSource
+            );
+          }
         }
-      }
+      })
     }
   };
 }

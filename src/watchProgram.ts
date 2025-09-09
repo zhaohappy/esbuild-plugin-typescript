@@ -1,4 +1,4 @@
-import type { PluginContext } from 'rollup';
+import type { PluginContext } from '../types';
 import typescript from 'typescript';
 import type {
   CustomTransformers,
@@ -41,7 +41,7 @@ interface CreateProgramOptions {
   /** Function to resolve a module location */
   resolveModule: Resolver;
   /** Custom TypeScript transformers */
-  transformers?: CustomTransformerFactories | ((program: Program) => CustomTransformers);
+  transformers?: CustomTransformerFactories | ((program: Program, getProgram?: () => Program) => CustomTransformers);
 }
 
 type DeferredResolve = ((value: boolean | PromiseLike<boolean>) => void) | (() => void);
@@ -158,11 +158,13 @@ function createWatchHost(
   );
 
   let createdTransformers: CustomTransformers | undefined;
+  let currentProgram: typescript.EmitAndSemanticDiagnosticsBuilderProgram
   return {
     ...baseHost,
     /** Override the created program so an in-memory emit is used */
     afterProgramCreate(program) {
       const origEmit = program.emit;
+      currentProgram = program
       // eslint-disable-next-line no-param-reassign
       program.emit = (
         targetSourceFile,
@@ -173,9 +175,14 @@ function createWatchHost(
       ) => {
         createdTransformers ??=
           typeof transformers === 'function'
-            ? transformers(program.getProgram())
+            ? transformers(program.getProgram(), () => {
+              return currentProgram.getProgram()
+            })
             : mergeTransformers(
                 program,
+                () => {
+                  return currentProgram.getProgram()
+                },
                 transformers,
                 customTransformers as CustomTransformerFactories
               );

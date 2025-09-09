@@ -9,7 +9,7 @@ export const DIRECTORY_PROPS = ['outDir', 'declarationDir'] as const;
 
 /**
  * Mutates the compiler options to convert paths from relative to absolute.
- * This should be used with compiler options passed through the Rollup plugin options,
+ * This should be used with compiler options passed through the esbuild plugin options,
  * not those found from loading a tsconfig.json file.
  * @param compilerOptions Compiler options to _mutate_.
  * @param relativeTo Paths are resolved relative to this path.
@@ -23,14 +23,14 @@ export function makePathsAbsolute(compilerOptions: PartialCompilerOptions, relat
 }
 
 /**
- * Mutates the compiler options to normalize some values for Rollup.
+ * Mutates the compiler options to normalize some values for esbuild.
  * @param compilerOptions Compiler options to _mutate_.
  * @returns True if the source map compiler option was not initially set.
  */
 export function normalizeCompilerOptions(ts: typeof typescript, compilerOptions: CompilerOptions) {
   let autoSetSourceMap = false;
   if (compilerOptions.inlineSourceMap) {
-    // Force separate source map files for Rollup to work with.
+    // Force separate source map files for esbuild to work with.
     compilerOptions.sourceMap = true;
     compilerOptions.inlineSourceMap = false;
   } else if (typeof compilerOptions.sourceMap !== 'boolean') {
